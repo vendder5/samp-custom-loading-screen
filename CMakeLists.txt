@@ -16,7 +16,7 @@ file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h")
 add_library(custom-loading-screen SHARED ${SOURCES})
 
 target_include_directories(custom-loading-screen PRIVATE ${DETOURS_INCLUDE_DIR} ${STB_INCLUDE_DIR})
-target_link_libraries(custom-loading-screen PRIVATE ${DETOURS_LIBRARY} d3d9)
+target_link_libraries(custom-loading-screen PRIVATE ${DETOURS_LIBRARY} d3d9 wininet)
 
 set_target_properties(custom-loading-screen PROPERTIES SUFFIX ".asi")
 
