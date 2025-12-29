@@ -13,6 +13,9 @@ cmake --build build --config Release
 
 ## installation
 
+> [!WARNING]
+> Image resolution or size might be affected if `widescreen.asi` is installed.
+
 1.  copy the generated `custom-loading-screen.asi` and `loadscs_config.cfg` (from `build/Release/`) to your gta san andreas root directory.
 
 2. make sure you have **silent's asi loader** installed.
