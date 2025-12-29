@@ -6,6 +6,7 @@
 
 #include "../Utils/TextureLoader.h"
 #include "../Utils/Config.h"
+#include "../Utils/ISprite.h"
 
 namespace D3D9Hook
 {
@@ -28,7 +29,7 @@ namespace D3D9Hook
 
     static bool m_bInitialized = false;
 
-    static IDirect3DTexture9* m_SplashTexture = nullptr;
+    static ISprite* m_SplashSprite = nullptr;
     static bool m_bTextureLoaded = false;
 
     struct Vertex
@@ -89,13 +90,13 @@ namespace D3D9Hook
 
         if (oDrawIndexedPrimitiveUP)
             DetourDetach(&(PVOID&)oDrawIndexedPrimitiveUP, Hook_DrawIndexedPrimitiveUP);
-
+        
         DetourTransactionCommit();
         
-        if (m_SplashTexture)
+        if (m_SplashSprite)
         {
-            m_SplashTexture->Release();
-            m_SplashTexture = nullptr;
+            delete m_SplashSprite;
+            m_SplashSprite = nullptr;
         }
     }
 
@@ -155,10 +156,10 @@ namespace D3D9Hook
 
     HRESULT WINAPI Hook_Reset(IDirect3DDevice9* pDevice, D3DPRESENT_PARAMETERS* pPresentationParameters)
     {
-        if (m_SplashTexture)
+        if (m_SplashSprite)
         {
-            m_SplashTexture->Release();
-            m_SplashTexture = nullptr;
+            delete m_SplashSprite;
+            m_SplashSprite = nullptr;
             m_bTextureLoaded = false;
         }
         return oReset(pDevice, pPresentationParameters);
@@ -166,12 +167,14 @@ namespace D3D9Hook
 
     HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
     {
-        if (m_SplashTexture)
+        if (m_SplashSprite)
         {
             IDirect3DBaseTexture9* pCurrentTex = nullptr;
-            if (SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
+            IDirect3DBaseTexture9* pMyTex = m_SplashSprite->GetTexture();
+
+            if (pMyTex && SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
             {
-                bool isMyTexture = (pCurrentTex == m_SplashTexture);
+                bool isMyTexture = (pCurrentTex == pMyTex);
                 pCurrentTex->Release(); 
 
                 if (isMyTexture)
@@ -231,12 +234,14 @@ namespace D3D9Hook
 
     HRESULT WINAPI Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
     {
-        if (m_SplashTexture)
+        if (m_SplashSprite)
         {
             IDirect3DBaseTexture9* pCurrentTex = nullptr;
-            if (SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
+            IDirect3DBaseTexture9* pMyTex = m_SplashSprite->GetTexture();
+
+            if (pMyTex && SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
             {
-                bool isMyTexture = (pCurrentTex == m_SplashTexture);
+                bool isMyTexture = (pCurrentTex == pMyTex);
                 pCurrentTex->Release();
 
                 if (isMyTexture)
@@ -261,7 +266,6 @@ namespace D3D9Hook
                         pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
                         pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
                         pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
-
 
                         D3DVIEWPORT9 oldVp;
                         pDevice->GetViewport(&oldVp);
@@ -304,11 +308,11 @@ namespace D3D9Hook
             
             if (!url.empty())
             {
-                m_SplashTexture = TextureLoader::LoadTextureFromURL(pDevice, url);
+                m_SplashSprite = TextureLoader::LoadSprite(pDevice, url, true);
             }
             else
             {
-                const std::vector<std::string> extensions = { ".png", ".jpg", ".jpeg", ".bmp" };
+                const std::vector<std::string> extensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
                 std::string foundPath = "";
 
                 for (const auto& ext : extensions)
@@ -323,14 +327,17 @@ namespace D3D9Hook
 
                 if (!foundPath.empty())
                 {
-                    m_SplashTexture = TextureLoader::LoadTexture(pDevice, foundPath);
+                    m_SplashSprite = TextureLoader::LoadSprite(pDevice, foundPath, false);
                 }
             }
 
             m_bTextureLoaded = true; 
         }
 
-        if (m_SplashTexture && Stage == 0 && pTexture)
+        if (m_SplashSprite)
+            m_SplashSprite->Update();
+
+        if (m_SplashSprite && Stage == 0 && pTexture)
         {
             static DWORD fvf;
             if (SUCCEEDED(pDevice->GetFVF(&fvf)) && (fvf & D3DFVF_XYZRHW))
@@ -347,11 +354,11 @@ namespace D3D9Hook
                     {
                         if (desc.Width > 256 && desc.Height > 256)
                         {
-                            pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-                            pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-                            pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
-                            
-                            return oSetTexture(pDevice, Stage, m_SplashTexture);
+                             pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+                             pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+                             pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+                             
+                             return oSetTexture(pDevice, Stage, m_SplashSprite->GetTexture());
                         }
                     }
                 }
