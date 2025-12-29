@@ -9,17 +9,18 @@ namespace TextureLoader
         int width, height, channels;
         unsigned char* data = stbi_load(filename.c_str(), &width, &height, &channels, 4);
 
-        if (!data) return nullptr;
+        if (!data)
+            return nullptr;
 
-        IDirect3DTexture9* pTexture = nullptr;
-        if (FAILED(pDevice->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr)))
+        IDirect3DTexture9* pSysTexture = nullptr;
+        if (FAILED(pDevice->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &pSysTexture, nullptr)))
         {
             stbi_image_free(data);
             return nullptr;
         }
 
         D3DLOCKED_RECT rect;
-        if (SUCCEEDED(pTexture->LockRect(0, &rect, nullptr, 0)))
+        if (SUCCEEDED(pSysTexture->LockRect(0, &rect, nullptr, 0)))
         {
             unsigned char* dest = static_cast<unsigned char*>(rect.pBits);
             
@@ -30,21 +31,27 @@ namespace TextureLoader
                 
                 for (int x = 0; x < width; ++x)
                 {
-                    unsigned char r = srcRow[x * 4 + 0];
-                    unsigned char g = srcRow[x * 4 + 1];
-                    unsigned char b = srcRow[x * 4 + 2];
-                    unsigned char a = srcRow[x * 4 + 3];
-
-                    destRow[x * 4 + 0] = b; 
-                    destRow[x * 4 + 1] = g; 
-                    destRow[x * 4 + 2] = r; 
-                    destRow[x * 4 + 3] = a; 
+                    destRow[x * 4 + 0] = srcRow[x * 4 + 2];
+                    destRow[x * 4 + 1] = srcRow[x * 4 + 1];
+                    destRow[x * 4 + 2] = srcRow[x * 4 + 0];
+                    destRow[x * 4 + 3] = srcRow[x * 4 + 3];
                 }
             }
-            pTexture->UnlockRect(0);
+            pSysTexture->UnlockRect(0);
+        }
+        stbi_image_free(data);
+
+        IDirect3DTexture9* pVidTexture = nullptr;
+        if (FAILED(pDevice->CreateTexture(width, height, 0, D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pVidTexture, nullptr)))
+        {
+            pSysTexture->Release();
+            return nullptr;
         }
 
-        stbi_image_free(data);
-        return pTexture;
+        pDevice->UpdateTexture(pSysTexture, pVidTexture);
+        pSysTexture->Release();
+
+        return pVidTexture;
     }
+
 }
