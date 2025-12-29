@@ -1,0 +1,50 @@
+#include "TextureLoader.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+namespace TextureLoader
+{
+    IDirect3DTexture9* LoadTexture(IDirect3DDevice9* pDevice, const std::string& filename)
+    {
+        int width, height, channels;
+        unsigned char* data = stbi_load(filename.c_str(), &width, &height, &channels, 4);
+
+        if (!data) return nullptr;
+
+        IDirect3DTexture9* pTexture = nullptr;
+        if (FAILED(pDevice->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr)))
+        {
+            stbi_image_free(data);
+            return nullptr;
+        }
+
+        D3DLOCKED_RECT rect;
+        if (SUCCEEDED(pTexture->LockRect(0, &rect, nullptr, 0)))
+        {
+            unsigned char* dest = static_cast<unsigned char*>(rect.pBits);
+            
+            for (int y = 0; y < height; ++y)
+            {
+                unsigned char* srcRow = data + (y * width * 4);
+                unsigned char* destRow = dest + (y * rect.Pitch);
+                
+                for (int x = 0; x < width; ++x)
+                {
+                    unsigned char r = srcRow[x * 4 + 0];
+                    unsigned char g = srcRow[x * 4 + 1];
+                    unsigned char b = srcRow[x * 4 + 2];
+                    unsigned char a = srcRow[x * 4 + 3];
+
+                    destRow[x * 4 + 0] = b; 
+                    destRow[x * 4 + 1] = g; 
+                    destRow[x * 4 + 2] = r; 
+                    destRow[x * 4 + 3] = a; 
+                }
+            }
+            pTexture->UnlockRect(0);
+        }
+
+        stbi_image_free(data);
+        return pTexture;
+    }
+}
