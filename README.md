@@ -31,7 +31,7 @@ IMAGE_URL=https://wallpapercave.com/wp/wp5334251.jpg
 
 If you leave `IMAGE_URL` empty or remove the line, the plugin falls back to loading a local file manually
 1.  Clear config: `IMAGE_URL=`
-2.  Place your image at: `GTA San Andreas/loadscs/loading_screen.png` ***(must be .png)***
+2.  Place your image at: `GTA San Andreas/loadscs/loading_screen.png` **(supports gif)**
 
 ## screenshots
 
