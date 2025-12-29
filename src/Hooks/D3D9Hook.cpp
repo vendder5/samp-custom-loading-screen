@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include "../Utils/TextureLoader.h"
+#include "../Utils/Config.h"
 
 namespace D3D9Hook
 {
@@ -77,7 +78,6 @@ namespace D3D9Hook
 
         if (oReset)
             DetourDetach(&(PVOID&)oReset, Hook_Reset);
-
         if (oSetTexture)
             DetourDetach(&(PVOID&)oSetTexture, Hook_SetTexture);
 
@@ -87,7 +87,6 @@ namespace D3D9Hook
         if (oDrawIndexedPrimitiveUP)
             DetourDetach(&(PVOID&)oDrawIndexedPrimitiveUP, Hook_DrawIndexedPrimitiveUP);
 
-        
         DetourTransactionCommit();
         
         if (m_SplashTexture)
@@ -194,12 +193,13 @@ namespace D3D9Hook
                         pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
                         pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
                         pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
-
+                        
                         D3DVIEWPORT9 oldVp;
                         pDevice->GetViewport(&oldVp);
 
                         D3DVIEWPORT9 newVp = { 0, 0, (DWORD)w, (DWORD)h, 0.0f, 1.0f };
                         pDevice->SetViewport(&newVp);
+
                         Vertex verts[4] = {
                             { -0.5f,     -0.5f,     0.5f, 1.0f, 0.0f, 0.0f }, 
                             { w - 0.5f,  -0.5f,     0.5f, 1.0f, 1.0f, 0.0f }, 
@@ -259,6 +259,7 @@ namespace D3D9Hook
                         pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
                         pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
 
+
                         D3DVIEWPORT9 oldVp;
                         pDevice->GetViewport(&oldVp);
 
@@ -297,7 +298,17 @@ namespace D3D9Hook
     {
         if (!m_bTextureLoaded)
         {
-            m_SplashTexture  = TextureLoader::LoadTexture(pDevice, "loading_screen.png");
+            std::string url = Config::GetConfigValue("config.cfg", "IMAGE_URL");
+            
+            if (!url.empty())
+            {
+                m_SplashTexture = TextureLoader::LoadTextureFromURL(pDevice, url);
+            }
+            else
+            {
+               m_SplashTexture = TextureLoader::LoadTexture(pDevice, "loadscs/loading_screen.png");
+            }
+
             m_bTextureLoaded = true; 
         }
 
@@ -318,7 +329,6 @@ namespace D3D9Hook
                     {
                         if (desc.Width > 256 && desc.Height > 256)
                         {
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
                              pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
                              pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
                              
