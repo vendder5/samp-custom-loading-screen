@@ -298,7 +298,7 @@ namespace D3D9Hook
     {
         if (!m_bTextureLoaded)
         {
-            std::string url = Config::GetConfigValue("config.cfg", "IMAGE_URL");
+            std::string url = Config::GetConfigValue("loadscs_config.cfg", "IMAGE_URL");
             
             if (!url.empty())
             {
