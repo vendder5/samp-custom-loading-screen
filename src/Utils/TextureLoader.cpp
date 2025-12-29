@@ -59,7 +59,8 @@ namespace TextureLoader
         int width, height, channels;
         unsigned char* data = stbi_load(filename.c_str(), &width, &height, &channels, 4);
 
-        if (!data) return nullptr;
+        if (!data)
+            return nullptr;
 
         IDirect3DTexture9* texture = CreateTextureFromData(pDevice, data, width, height);
         stbi_image_free(data);
@@ -68,8 +69,9 @@ namespace TextureLoader
 
     IDirect3DTexture9* LoadTextureFromURL(IDirect3DDevice9* pDevice, const std::string& url)
     {
-        HINTERNET hInternet = InternetOpenA("Loadcs/1.0", INTERNET_OPEN_TYPE_DIRECT, nullptr, nullptr, 0);
-        if (!hInternet) return nullptr;
+        HINTERNET hInternet = InternetOpenA("Loadscs/1.0", INTERNET_OPEN_TYPE_DIRECT, nullptr, nullptr, 0);
+        if (!hInternet)
+            return nullptr;
 
         HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), nullptr, 0, INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
         if (!hUrl)
@@ -91,12 +93,14 @@ namespace TextureLoader
         InternetCloseHandle(hUrl);
         InternetCloseHandle(hInternet);
 
-        if (buffer.empty()) return nullptr;
+        if (buffer.empty())
+            return nullptr;
 
         int width, height, channels;
         unsigned char* data = stbi_load_from_memory(buffer.data(), (int)buffer.size(), &width, &height, &channels, 4);
 
-        if (!data) return nullptr;
+        if (!data)
+            return nullptr;
 
         IDirect3DTexture9* texture = CreateTextureFromData(pDevice, data, width, height);
         stbi_image_free(data);
