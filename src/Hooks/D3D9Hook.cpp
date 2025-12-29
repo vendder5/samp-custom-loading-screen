@@ -1,6 +1,8 @@
 #include "D3D9Hook.h"
 #include <detours/detours.h>
 #include <iostream>
+#include <filesystem>
+#include <vector>
 
 #include "../Utils/TextureLoader.h"
 #include "../Utils/Config.h"
@@ -78,6 +80,7 @@ namespace D3D9Hook
 
         if (oReset)
             DetourDetach(&(PVOID&)oReset, Hook_Reset);
+
         if (oSetTexture)
             DetourDetach(&(PVOID&)oSetTexture, Hook_SetTexture);
 
@@ -294,7 +297,6 @@ namespace D3D9Hook
 
 
     HRESULT WINAPI Hook_SetTexture(IDirect3DDevice9* pDevice, DWORD Stage, IDirect3DBaseTexture9* pTexture)
-
     {
         if (!m_bTextureLoaded)
         {
@@ -306,7 +308,23 @@ namespace D3D9Hook
             }
             else
             {
-               m_SplashTexture = TextureLoader::LoadTexture(pDevice, "loadscs/loading_screen.png");
+                const std::vector<std::string> extensions = { ".png", ".jpg", ".jpeg", ".bmp" };
+                std::string foundPath = "";
+
+                for (const auto& ext : extensions)
+                {
+                    std::string path = "loadscs/loading_screen" + ext;
+                    if (std::filesystem::exists(path))
+                    {
+                        foundPath = path;
+                        break;
+                    }
+                }
+
+                if (!foundPath.empty())
+                {
+                    m_SplashTexture = TextureLoader::LoadTexture(pDevice, foundPath);
+                }
             }
 
             m_bTextureLoaded = true; 
@@ -329,10 +347,11 @@ namespace D3D9Hook
                     {
                         if (desc.Width > 256 && desc.Height > 256)
                         {
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
-                             
-                             return oSetTexture(pDevice, Stage, m_SplashTexture);
+                            pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+                            pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+                            pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+                            
+                            return oSetTexture(pDevice, Stage, m_SplashTexture);
                         }
                     }
                 }
