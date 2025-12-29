@@ -38,3 +38,8 @@ If you leave `IMAGE_URL` empty or remove the line, the plugin falls back to load
 
 **with plugin**
 ![with](images/with_plugin.png)
+
+![animated](images/animated.gif)
+
+> [!WARNING]
+> Image resolution or size might be affected if `widescreen.asi` is installed.
