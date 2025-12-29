@@ -13,11 +13,22 @@ cmake --build build --config Release
 
 ## installation
 
-1.  copy the generated `custom-loading-screen.asi` (from `build/Release/`) to your gta san andreas root directory.
+1.  copy the generated `custom-loading-screen.asi` and `loadscs_config.cfg` (from `build/Release/`) to your gta san andreas root directory.
 
 2. make sure you have **silent's asi loader** installed.
+## usage
+**1. URL**
 
-3.  place your custom loading image in the same root directory where you installed the plugin. it must be named **“loading_screen.png”**
+In `loadscs_config.cfg`, set the `IMAGE_URL` to a direct link of a PNG or JPG image.
+```ini
+IMAGE_URL=https://wallpapercave.com/wp/wp5334251.jpg
+```
+
+**2. LOCAL IMAGE**
+
+If you leave `IMAGE_URL` empty or remove the line, the plugin falls back to loading a local file manually
+1.  Clear config: `IMAGE_URL=`
+2.  Place your image at: `GTA San Andreas/loadscs/loading_screen.png` ***(must be .png)***
 
 ## screenshots
 
