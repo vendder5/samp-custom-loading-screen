@@ -2,6 +2,8 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <windows.h>
+#include <filesystem>
 
 namespace Config
 {
@@ -16,9 +18,19 @@ namespace Config
             str.substr(first, (last - first + 1));
     }
 
+    std::string GetAbsoluteGamePath(const std::string& relativePath)
+    {
+        char buffer[MAX_PATH];
+        GetModuleFileNameA(NULL, buffer, MAX_PATH);
+        std::filesystem::path execPath(buffer);
+        std::filesystem::path gameDir = execPath.parent_path();
+        return (gameDir / relativePath).string();
+    }
+
     std::string GetConfigValue(const std::string& filename, const std::string& key)
     {
-        std::ifstream file(filename);
+        std::string absPath = GetAbsoluteGamePath(filename);
+        std::ifstream file(absPath);
         if (!file.is_open())
             return "";
 

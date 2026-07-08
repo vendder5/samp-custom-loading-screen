@@ -5,4 +5,5 @@
 namespace Config
 {
     std::string GetConfigValue(const std::string& filename, const std::string& key);
+    std::string GetAbsoluteGamePath(const std::string& relativePath);
 }
