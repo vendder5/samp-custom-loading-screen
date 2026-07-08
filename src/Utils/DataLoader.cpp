@@ -54,4 +54,10 @@ namespace DataLoader
 
         return {};
     }
+
+    bool DownloadFile(const std::string& url, const std::string& destPath)
+    {
+        HRESULT hr = URLDownloadToFileA(nullptr, url.c_str(), destPath.c_str(), 0, nullptr);
+        return SUCCEEDED(hr);
+    }
 }
