@@ -7,12 +7,16 @@
 class StaticSprite : public ISprite
 {
     IDirect3DTexture9* m_pTexture;
+    int m_Width;
+    int m_Height;
 public:
-    StaticSprite(IDirect3DTexture9* pTex) : m_pTexture(pTex) {}
+    StaticSprite(IDirect3DTexture9* pTex, int w, int h) : m_pTexture(pTex), m_Width(w), m_Height(h) {}
     ~StaticSprite() { if (m_pTexture) m_pTexture->Release(); }
 
     void Update() override {}
     IDirect3DTexture9* GetTexture() override { return m_pTexture; }
+    int GetWidth() override { return m_Width; }
+    int GetHeight() override { return m_Height; }
 };
 
 class GifSprite : public ISprite
@@ -26,14 +30,16 @@ public:
 private:
     std::vector<Frame> m_Frames;
     int m_CurrentFrameIndex;
+    int m_Width;
+    int m_Height;
     
     using Clock = std::chrono::high_resolution_clock;
     Clock::time_point m_LastTime;
     double m_TimeAccumulator;
 
 public:
-    GifSprite(const std::vector<Frame>& frames) 
-        : m_Frames(frames), m_CurrentFrameIndex(0), m_TimeAccumulator(0.0) 
+    GifSprite(const std::vector<Frame>& frames, int w, int h) 
+        : m_Frames(frames), m_CurrentFrameIndex(0), m_Width(w), m_Height(h), m_TimeAccumulator(0.0) 
     {
         m_LastTime = Clock::now();
 
@@ -80,6 +86,9 @@ public:
         if (m_Frames.empty()) return nullptr;
         return m_Frames[m_CurrentFrameIndex].texture;
     }
+
+    int GetWidth() override { return m_Width; }
+    int GetHeight() override { return m_Height; }
 };
 
 class VideoSprite : public ISprite
@@ -87,6 +96,8 @@ class VideoSprite : public ISprite
 public:
     void Update() override {}
     IDirect3DTexture9* GetTexture() override { return nullptr; }
+    int GetWidth() override { return 0; }
+    int GetHeight() override { return 0; }
 };
 
 class LottieSprite : public ISprite
@@ -94,4 +105,6 @@ class LottieSprite : public ISprite
 public:
     void Update() override {}
     IDirect3DTexture9* GetTexture() override { return nullptr; }
+    int GetWidth() override { return 0; }
+    int GetHeight() override { return 0; }
 };
