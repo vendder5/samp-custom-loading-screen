@@ -3,8 +3,12 @@
 #include <iostream>
 #include <filesystem>
 #include <vector>
+#include <thread>
+#include <atomic>
+#include <algorithm>
 
 #include "../Utils/TextureLoader.h"
+#include "../Utils/DataLoader.h"
 #include "../Utils/Config.h"
 #include "../Utils/ISprite.h"
 
@@ -26,11 +30,23 @@ namespace D3D9Hook
     static DrawPrimitiveUP_t oDrawPrimitiveUP = nullptr;
     static DrawIndexedPrimitiveUP_t oDrawIndexedPrimitiveUP = nullptr;
 
-
     static bool m_bInitialized = false;
 
     static ISprite* m_SplashSprite = nullptr;
     static bool m_bTextureLoaded = false;
+
+    enum class FitMode
+    {
+        STRETCH,
+        FIT,
+        FILL
+    };
+    static FitMode m_FitMode = FitMode::STRETCH;
+
+    static std::atomic<bool> m_bLoaderThreadStarted = false;
+    static std::atomic<bool> m_bLoadingFinished = false;
+    static std::atomic<TextureLoader::DecodedSpriteData*> m_DecodedData = nullptr;
+    static IDirect3DBaseTexture9* m_DefaultLoadingTexture = nullptr;
 
     struct Vertex
     {
@@ -48,6 +64,192 @@ namespace D3D9Hook
     HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
     HRESULT WINAPI Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride);
 
+    bool IsValidReadPtr(void* ptr, size_t size)
+    {
+        if (!ptr) return false;
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0) return false;
+        if (mbi.State != MEM_COMMIT) return false;
+        if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) return false;
+        return (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+    }
+
+    void CalculateVertices(float screenW, float screenH, float imgW, float imgH, FitMode mode, Vertex* verts)
+    {
+        float targetW = screenW;
+        float targetH = screenH;
+        float xOffset = 0.0f;
+        float yOffset = 0.0f;
+
+        if (mode != FitMode::STRETCH && imgW > 0.0f && imgH > 0.0f)
+        {
+            float screenAspect = screenW / screenH;
+            float imgAspect = imgW / imgH;
+
+            if (mode == FitMode::FIT)
+            {
+                if (imgAspect > screenAspect)
+                {
+                    targetW = screenW;
+                    targetH = screenW / imgAspect;
+                    yOffset = (screenH - targetH) / 2.0f;
+                }
+                else
+                {
+                    targetH = screenH;
+                    targetW = screenH * imgAspect;
+                    xOffset = (screenW - targetW) / 2.0f;
+                }
+            }
+            else if (mode == FitMode::FILL)
+            {
+                if (imgAspect > screenAspect)
+                {
+                    targetH = screenH;
+                    targetW = screenH * imgAspect;
+                    xOffset = (screenW - targetW) / 2.0f;
+                }
+                else
+                {
+                    targetW = screenW;
+                    targetH = screenW / imgAspect;
+                    yOffset = (screenH - targetH) / 2.0f;
+                }
+            }
+        }
+
+        verts[0] = { xOffset - 0.5f,           yOffset - 0.5f,           0.5f, 1.0f, 0.0f, 0.0f };
+        verts[1] = { xOffset + targetW - 0.5f, yOffset - 0.5f,           0.5f, 1.0f, 1.0f, 0.0f };
+        verts[2] = { xOffset - 0.5f,           yOffset + targetH - 0.5f, 0.5f, 1.0f, 0.0f, 1.0f };
+        verts[3] = { xOffset + targetW - 0.5f, yOffset + targetH - 0.5f, 0.5f, 1.0f, 1.0f, 1.0f };
+    }
+
+    void AsyncLoadProc()
+    {
+        std::string url = Config::GetConfigValue("loadscs_config.cfg", "IMAGE_URL");
+        std::string modeStr = Config::GetConfigValue("loadscs_config.cfg", "FIT_MODE");
+        
+        std::transform(modeStr.begin(), modeStr.end(), modeStr.begin(), ::toupper);
+        if (modeStr == "FIT") m_FitMode = FitMode::FIT;
+        else if (modeStr == "FILL") m_FitMode = FitMode::FILL;
+        else m_FitMode = FitMode::STRETCH;
+
+        std::string cachePath = Config::GetAbsoluteGamePath("loadscs/cache/cached_image.dat");
+        std::vector<unsigned char> data;
+        bool loadedFromCache = false;
+
+        if (!url.empty())
+        {
+            if (std::filesystem::exists(cachePath))
+            {
+                data = DataLoader::LoadFromFile(cachePath);
+                if (!data.empty())
+                {
+                    loadedFromCache = true;
+                }
+            }
+
+            if (loadedFromCache)
+            {
+                auto decoded = TextureLoader::DecodeSpriteFromMemory(data);
+                if (decoded)
+                {
+                    m_DecodedData = decoded;
+                    m_bLoadingFinished = true;
+                }
+            }
+
+            std::string tempDownloadPath = Config::GetAbsoluteGamePath("loadscs/cache/temp_download.dat");
+            std::filesystem::create_directories(std::filesystem::path(cachePath).parent_path());
+            
+            std::error_code ec;
+            std::filesystem::remove(tempDownloadPath, ec);
+
+            if (DataLoader::DownloadFile(url, tempDownloadPath))
+            {
+                auto downloadedData = DataLoader::LoadFromFile(tempDownloadPath);
+                if (!downloadedData.empty())
+                {
+                    bool shouldUpdate = !loadedFromCache;
+                    if (loadedFromCache)
+                    {
+                        if (downloadedData != data)
+                        {
+                            shouldUpdate = true;
+                        }
+                    }
+
+                    if (shouldUpdate)
+                    {
+                        std::filesystem::copy_file(tempDownloadPath, cachePath, std::filesystem::copy_options::overwrite_existing, ec);
+                        
+                        auto decoded = TextureLoader::DecodeSpriteFromMemory(downloadedData);
+                        if (decoded)
+                        {
+                            auto oldDecoded = m_DecodedData.exchange(decoded);
+                            if (oldDecoded) delete oldDecoded;
+                            m_bLoadingFinished = true;
+                        }
+                    }
+                }
+            }
+            std::filesystem::remove(tempDownloadPath, ec);
+        }
+        else
+        {
+            const std::vector<std::string> extensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
+            std::string foundPath = "";
+
+            for (const auto& ext : extensions)
+            {
+                std::string path = Config::GetAbsoluteGamePath("loadscs/loading_screen" + ext);
+                if (std::filesystem::exists(path))
+                {
+                    foundPath = path;
+                    break;
+                }
+            }
+
+            if (!foundPath.empty())
+            {
+                data = DataLoader::LoadFromFile(foundPath);
+                if (!data.empty())
+                {
+                    auto decoded = TextureLoader::DecodeSpriteFromMemory(data);
+                    if (decoded)
+                    {
+                        m_DecodedData = decoded;
+                        m_bLoadingFinished = true;
+                    }
+                }
+            }
+        }
+
+        m_bLoadingFinished = true;
+    }
+
+    void UpdateLoadingState(IDirect3DDevice9* pDevice)
+    {
+        if (!m_bTextureLoaded)
+        {
+            bool expected = false;
+            if (m_bLoaderThreadStarted.compare_exchange_strong(expected, true))
+            {
+                std::thread(AsyncLoadProc).detach();
+            }
+
+            if (m_bLoadingFinished)
+            {
+                TextureLoader::DecodedSpriteData* decoded = m_DecodedData.exchange(nullptr);
+                if (decoded)
+                {
+                    m_SplashSprite = TextureLoader::CreateSpriteFromDecodedData(pDevice, decoded);
+                    delete decoded;
+                }
+                m_bTextureLoaded = true;
+            }
+        }
+    }
 
     void Install()
     {
@@ -98,6 +300,14 @@ namespace D3D9Hook
             delete m_SplashSprite;
             m_SplashSprite = nullptr;
         }
+
+        m_DefaultLoadingTexture = nullptr;
+
+        TextureLoader::DecodedSpriteData* decoded = m_DecodedData.exchange(nullptr);
+        if (decoded)
+        {
+            delete decoded;
+        }
     }
 
     IDirect3D9* WINAPI Hook_Direct3DCreate9(UINT SDKVersion)
@@ -143,7 +353,6 @@ namespace D3D9Hook
             DetourAttach(&(PVOID&)oDrawPrimitiveUP, Hook_DrawPrimitiveUP);
             DetourAttach(&(PVOID&)oDrawIndexedPrimitiveUP, Hook_DrawIndexedPrimitiveUP);
             DetourTransactionCommit();
-
         }
 
         return hr;
@@ -160,22 +369,36 @@ namespace D3D9Hook
         {
             delete m_SplashSprite;
             m_SplashSprite = nullptr;
-            m_bTextureLoaded = false;
         }
+        m_bTextureLoaded = false;
+        m_bLoaderThreadStarted = false;
+        m_bLoadingFinished = false;
+        m_DefaultLoadingTexture = nullptr;
+        
+        TextureLoader::DecodedSpriteData* decoded = m_DecodedData.exchange(nullptr);
+        if (decoded)
+        {
+            delete decoded;
+        }
+
         return oReset(pDevice, pPresentationParameters);
     }
 
     HRESULT WINAPI Hook_DrawPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
     {
+        UpdateLoadingState(pDevice);
+
         if (m_SplashSprite)
         {
+            m_SplashSprite->Update();
+
             IDirect3DBaseTexture9* pCurrentTex = nullptr;
             IDirect3DBaseTexture9* pMyTex = m_SplashSprite->GetTexture();
 
             if (pMyTex && SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
             {
-                bool isMyTexture = (pCurrentTex == pMyTex);
-                pCurrentTex->Release(); 
+                bool isDefaultTex = (m_DefaultLoadingTexture && pCurrentTex == m_DefaultLoadingTexture);
+                bool isMyTexture = (pCurrentTex == pMyTex || isDefaultTex);
 
                 if (isMyTexture)
                 {
@@ -206,15 +429,23 @@ namespace D3D9Hook
                         D3DVIEWPORT9 newVp = { 0, 0, (DWORD)w, (DWORD)h, 0.0f, 1.0f };
                         pDevice->SetViewport(&newVp);
 
-                        Vertex verts[4] = {
-                            { -0.5f,     -0.5f,     0.5f, 1.0f, 0.0f, 0.0f }, 
-                            { w - 0.5f,  -0.5f,     0.5f, 1.0f, 1.0f, 0.0f }, 
-                            { -0.5f,     h - 0.5f,  0.5f, 1.0f, 0.0f, 1.0f }, 
-                            { w - 0.5f,  h - 0.5f,  0.5f, 1.0f, 1.0f, 1.0f }  
-                        };
+                        pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 1.0f, 0);
+
+                        Vertex verts[4];
+                        CalculateVertices(w, h, (float)m_SplashSprite->GetWidth(), (float)m_SplashSprite->GetHeight(), m_FitMode, verts);
+
+                        if (isDefaultTex)
+                        {
+                            pDevice->SetTexture(0, pMyTex);
+                        }
 
                         pDevice->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
                         HRESULT res = oDrawPrimitiveUP(pDevice, D3DPT_TRIANGLESTRIP, 2, verts, sizeof(Vertex));
+
+                        if (isDefaultTex)
+                        {
+                            pDevice->SetTexture(0, pCurrentTex);
+                        }
 
                         pDevice->SetViewport(&oldVp);
                         pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissor);
@@ -222,11 +453,11 @@ namespace D3D9Hook
                         pDevice->SetRenderState(D3DRS_CULLMODE, oldCull);
                         pDevice->SetRenderState(D3DRS_FILLMODE, oldFill);
 
+                        pCurrentTex->Release();
                         return res;
-
                     }
-
                 }
+                pCurrentTex->Release();
             }
         }
         return oDrawPrimitiveUP(pDevice, PrimitiveType, PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
@@ -234,15 +465,19 @@ namespace D3D9Hook
 
     HRESULT WINAPI Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9* pDevice, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT PrimitiveCount, CONST void* pIndexData, D3DFORMAT IndexDataFormat, CONST void* pVertexStreamZeroData, UINT VertexStreamZeroStride)
     {
+        UpdateLoadingState(pDevice);
+
         if (m_SplashSprite)
         {
+            m_SplashSprite->Update();
+
             IDirect3DBaseTexture9* pCurrentTex = nullptr;
             IDirect3DBaseTexture9* pMyTex = m_SplashSprite->GetTexture();
 
             if (pMyTex && SUCCEEDED(pDevice->GetTexture(0, &pCurrentTex)) && pCurrentTex)
             {
-                bool isMyTexture = (pCurrentTex == pMyTex);
-                pCurrentTex->Release();
+                bool isDefaultTex = (m_DefaultLoadingTexture && pCurrentTex == m_DefaultLoadingTexture);
+                bool isMyTexture = (pCurrentTex == pMyTex || isDefaultTex);
 
                 if (isMyTexture)
                 {
@@ -273,77 +508,57 @@ namespace D3D9Hook
                         D3DVIEWPORT9 newVp = { 0, 0, (DWORD)w, (DWORD)h, 0.0f, 1.0f };
                         pDevice->SetViewport(&newVp);
 
-                        Vertex verts[4] = {
-                            { -0.5f,     -0.5f,     0.5f, 1.0f, 0.0f, 0.0f }, 
-                            { w - 0.5f,  -0.5f,     0.5f, 1.0f, 1.0f, 0.0f }, 
-                            { -0.5f,     h - 0.5f,  0.5f, 1.0f, 0.0f, 1.0f }, 
-                            { w - 0.5f,  h - 0.5f,  0.5f, 1.0f, 1.0f, 1.0f }  
-                        };
+                        pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 1.0f, 0);
+
+                        Vertex verts[4];
+                        CalculateVertices(w, h, (float)m_SplashSprite->GetWidth(), (float)m_SplashSprite->GetHeight(), m_FitMode, verts);
+
+                        if (isDefaultTex)
+                        {
+                            pDevice->SetTexture(0, pMyTex);
+                        }
 
                         pDevice->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
                         HRESULT res = oDrawPrimitiveUP(pDevice, D3DPT_TRIANGLESTRIP, 2, verts, sizeof(Vertex));
 
-                        // Restore State
+                        if (isDefaultTex)
+                        {
+                            pDevice->SetTexture(0, pCurrentTex);
+                        }
+
                         pDevice->SetViewport(&oldVp);
                         pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissor);
                         pDevice->SetRenderState(D3DRS_ZENABLE, oldZEnable);
                         pDevice->SetRenderState(D3DRS_CULLMODE, oldCull);
                         pDevice->SetRenderState(D3DRS_FILLMODE, oldFill);
 
+                        pCurrentTex->Release();
                         return res;
                     }
                 }
+                pCurrentTex->Release();
             }
         }
         return oDrawIndexedPrimitiveUP(pDevice, PrimitiveType, MinVertexIndex, NumVertices, PrimitiveCount, pIndexData, IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
     }
 
-
-
     HRESULT WINAPI Hook_SetTexture(IDirect3DDevice9* pDevice, DWORD Stage, IDirect3DBaseTexture9* pTexture)
     {
-        if (!m_bTextureLoaded)
-        {
-            std::string url = Config::GetConfigValue("loadscs_config.cfg", "IMAGE_URL");
-            
-            if (!url.empty())
-            {
-                m_SplashSprite = TextureLoader::LoadSprite(pDevice, url, true);
-            }
-            else
-            {
-                const std::vector<std::string> extensions = { ".png", ".jpg", ".jpeg", ".bmp", ".gif" };
-                std::string foundPath = "";
-
-                for (const auto& ext : extensions)
-                {
-                    std::string path = "loadscs/loading_screen" + ext;
-                    if (std::filesystem::exists(path))
-                    {
-                        foundPath = path;
-                        break;
-                    }
-                }
-
-                if (!foundPath.empty())
-                {
-                    m_SplashSprite = TextureLoader::LoadSprite(pDevice, foundPath, false);
-                }
-            }
-
-            m_bTextureLoaded = true; 
-        }
+        UpdateLoadingState(pDevice);
 
         if (m_SplashSprite)
             m_SplashSprite->Update();
 
-        if (m_SplashSprite && Stage == 0 && pTexture)
+        if (Stage == 0 && pTexture)
         {
             static DWORD fvf;
             if (SUCCEEDED(pDevice->GetFVF(&fvf)) && (fvf & D3DFVF_XYZRHW))
             {
                 int state = -1;
-                try { if (pGameState) state = *pGameState; } catch(...) {}
+                if (IsValidReadPtr(pGameState, sizeof(int)))
+                {
+                    state = *pGameState;
+                }
                 
                 if (state >= 0 && state <= 8)
                 {
@@ -354,11 +569,16 @@ namespace D3D9Hook
                     {
                         if (desc.Width > 256 && desc.Height > 256)
                         {
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-                             pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
-                             
-                             return oSetTexture(pDevice, Stage, m_SplashSprite->GetTexture());
+                             m_DefaultLoadingTexture = pTexture;
+
+                             if (m_SplashSprite)
+                             {
+                                 pDevice->SetSamplerState(Stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+                                 pDevice->SetSamplerState(Stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+                                 pDevice->SetSamplerState(Stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+                                 
+                                 return oSetTexture(pDevice, Stage, m_SplashSprite->GetTexture());
+                             }
                         }
                     }
                 }
